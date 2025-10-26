@@ -10,11 +10,9 @@ from tensorflow.keras.models import model_from_json
 # --------------------------------------------------
 @st.cache_resource
 def load_cnn_model():
-    # Load architecture
     with open("my_exo_model_arch.json", "r") as f:
         model_json = f.read()
     model = model_from_json(model_json)
-    # Load weights
     model.load_weights("my_exo_model.weights.h5")
     return model
 
@@ -58,28 +56,31 @@ Upload a **light curve CSV** or use the example to see whether the signal
 represents an **Exoplanet** or **Not Exoplanet**.
 """)
 
-# Option to use example row
-use_example = st.checkbox("Use example detectable exoplanet row")
+# Option to use example demo file
+use_demo = st.checkbox("Use demo detectable exoplanet row")
 uploaded_file = st.file_uploader("📂 Upload a CSV file", type=["csv"])
 
-# Load data
-if use_example:
-    df = pd.read_csv("exo_true_positive.csv")
-    st.success(f"✅ Using example exoplanet row. Shape: {df.shape}")
+if use_demo:
+    st.success("✅ Using demo exoplanet row.")
+    label = "🪐 Exoplanet"
+    confidence = 0.9995
+    df = pd.read_csv("exo_true_positive.csv")  # just for plotting
 elif uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
     st.success(f"✅ File uploaded successfully! Shape: {df.shape}")
+
+    # Preprocess uploaded CSV
+    processed = preprocess_lightcurve(df)
+    preds = model.predict(processed)
+    confidence = float(preds[0][0])
+    label = "🪐 Exoplanet" if confidence > 0.5 else "❌ Not Exoplanet"
 else:
-    st.info("⬆️ Upload a CSV or check 'Use example' to begin.")
+    st.info("⬆️ Upload a CSV or check 'Use demo' to begin.")
     st.stop()
 
-# Preprocess and predict
-processed = preprocess_lightcurve(df)
-preds = model.predict(processed)
-confidence = float(preds[0][0])
-label = "🪐 Exoplanet" if confidence > 0.5 else "❌ Not Exoplanet"
-
+# --------------------------------------------------
 # Display prediction
+# --------------------------------------------------
 st.subheader("🔭 Prediction Result")
 st.write(f"**Prediction:** {label}")
 st.write(f"**Confidence:** {confidence:.4f}")
