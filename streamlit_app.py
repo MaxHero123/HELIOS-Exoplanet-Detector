@@ -45,22 +45,17 @@ def preprocess_lightcurve(df):
     except Exception as e:
         st.warning(f"Savitzky–Golay failed: {e}")
 
-    # 3️⃣ Normalize
-    minval, maxval = np.min(X), np.max(X)
-    st.write("Before normalization — min:", minval, "max:", maxval)
-    if maxval != minval:
-        X = (X - minval) / (maxval - minval)
-    else:
-        st.warning("Normalization skipped: constant signal detected")
+    # 🚫 Skip per-sample normalization
+    st.info("Skipping normalization to preserve scale")
 
-    # 4️⃣ Robust scaling
+    # 3️⃣ Robust scaling (as in training)
     try:
         scaler = RobustScaler()
         X = scaler.fit_transform(X)
     except Exception as e:
         st.warning(f"Scaling failed: {e}")
 
-    # 5️⃣ Expand dims
+    # 4️⃣ Expand dims for CNN
     X = np.expand_dims(X, axis=2)
 
     st.write("✅ Finished preprocessing. Stats:")
