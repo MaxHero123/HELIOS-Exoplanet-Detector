@@ -25,15 +25,19 @@ def preprocess_lightcurve(df):
         if "label" in col.lower() or "index" in col.lower():
             df = df.drop(columns=[col])
 
-    # Flatten to 1D array (3197,)
-    X = df.values.flatten()
+    st.write("🔍 Before flattening:", df.shape)
+    st.write(df.head())
 
-    # Ensure shape (1, 3197)
-    X = X.reshape(1, -1)
+    # Flatten or transpose if needed
+    if df.shape[0] == 1:
+        X = df.values
+    else:
+        X = df.values.flatten().reshape(1, -1)
     st.write("📊 Shape before processing:", X.shape)
 
-    # 1️⃣ Fourier Transform
+    # 1️⃣ FFT
     X = np.abs(np.fft.fft(X, axis=1))
+    st.write("After FFT — Min:", np.min(X), "Max:", np.max(X))
 
     # 2️⃣ Savitzky–Golay smoothing
     try:
@@ -43,6 +47,7 @@ def preprocess_lightcurve(df):
 
     # 3️⃣ Normalize
     minval, maxval = np.min(X), np.max(X)
+    st.write("Before normalization — min:", minval, "max:", maxval)
     if maxval != minval:
         X = (X - minval) / (maxval - minval)
     else:
@@ -55,7 +60,7 @@ def preprocess_lightcurve(df):
     except Exception as e:
         st.warning(f"Scaling failed: {e}")
 
-    # 5️⃣ Expand dims for CNN
+    # 5️⃣ Expand dims
     X = np.expand_dims(X, axis=2)
 
     st.write("✅ Finished preprocessing. Stats:")
