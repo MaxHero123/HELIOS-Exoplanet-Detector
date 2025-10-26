@@ -9,7 +9,7 @@ from tensorflow.keras.models import load_model
 # --------------------------------------------------
 @st.cache_resource
 def load_cnn_model():
-    model = load_model("my_exo_model (3).keras")
+    model = load_model("my_exo_model.keras")
     return model
 
 model = load_cnn_model()
