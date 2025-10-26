@@ -73,8 +73,15 @@ if uploaded_file is not None:
         # Preprocess the light curve
         processed = preprocess_lightcurve(df)
 
-        # Predict
+        # 🧠 Diagnostic info
+        st.write("Processed data shape:", processed.shape)
+        st.write("First 10 processed values:", processed.flatten()[:10])
+        st.write("Min:", np.min(processed), "Max:", np.max(processed))
+
+        # Make predictions
         preds = model.predict(processed)
+        st.write("Raw model output:", preds[:10])
+
         confidence = float(np.mean(preds))
         label = "🪐 Exoplanet" if confidence > 0.5 else "❌ Not Exoplanet"
 
@@ -85,6 +92,7 @@ if uploaded_file is not None:
 
         # Optional: visualize one sample
         st.line_chart(df.iloc[0, :])
+
     except Exception as e:
         st.error(f"An error occurred during processing: {e}")
 else:
