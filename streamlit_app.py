@@ -19,12 +19,18 @@ model = load_cnn_model()
 # Preprocessing Pipeline (must match training exactly)
 # --------------------------------------------------
 def preprocess_lightcurve(df):
-    # Drop index or label columns if present
+    # Drop index or label columns
     for col in df.columns:
         if col.lower() in ["index", "label", "labels"]:
             df = df.drop(columns=[col])
-    
+
     X = df.values
+
+    # Ensure correct shape (1 x 3197)
+    if X.shape[0] == 3197 and X.shape[1] == 1:
+        X = X.T
+    elif X.ndim == 1:
+        X = X.reshape(1, -1)
 
     # 1️⃣ Fourier Transform
     X = np.abs(np.fft.fft(X, axis=1))
@@ -32,16 +38,16 @@ def preprocess_lightcurve(df):
     # 2️⃣ Savitzky–Golay smoothing
     X = savgol_filter(X, 21, 4, deriv=0)
 
-    # 3️⃣ Normalize (same as training function)
+    # 3️⃣ Normalize (identical to training)
     minval = np.min(X)
     maxval = np.max(X)
     X = (X - minval) / (maxval - minval)
 
-    # 4️⃣ Robust Scaling
+    # 4️⃣ Robust scaling
     scaler = RobustScaler()
     X = scaler.fit_transform(X)
 
-    # 5️⃣ Add dimension for CNN
+    # 5️⃣ Expand dims for CNN
     X = np.expand_dims(X, axis=2)
 
     return X
