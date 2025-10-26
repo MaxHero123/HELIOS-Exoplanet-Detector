@@ -77,7 +77,15 @@ if uploaded_file is not None:
         st.write(f"**Prediction:** {label}")
         st.write(f"**Confidence:** {confidence:.4f}")
 
-        st.line_chart(df.T.iloc[0])
+        # Drop non-flux columns for plotting
+        plot_df = df.copy()
+        for col in df.columns:
+            if col.lower() in ["index", "label", "labels"]:
+                plot_df = plot_df.drop(columns=[col])
+
+        # Make sure it’s a 1D array for plotting
+        st.line_chart(plot_df.values.flatten())
+
     except Exception as e:
         st.error(f"⚠️ Error: {e}")
 else:
@@ -85,3 +93,4 @@ else:
 
 st.markdown("---")
 st.caption("Created by MaxHero123 — Powered by Streamlit + TensorFlow")
+
