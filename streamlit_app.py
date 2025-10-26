@@ -1,77 +1,87 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
+from scipy.signal import savgol_filter
+from sklearn.preprocessing import RobustScaler
 from tensorflow.keras.models import model_from_json
-from scipy.fft import fft
-from astropy.io import fits
 
-# ---------------------------
-# Load your trained model
-# ---------------------------
+# --------------------------------------------------
+# Load model architecture and weights
+# --------------------------------------------------
 @st.cache_resource
-def load_model():
-    with open("my_exo_model_arch.json", "r") as json_file:
-        loaded_model_json = json_file.read()
-    model = model_from_json(loaded_model_json)
+def load_cnn_model():
+    with open("my_exo_model_arch.json", "r") as f:
+        model_json = f.read()
+    model = model_from_json(model_json)
     model.load_weights("my_exo_model.weights.h5")
-    model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"])
     return model
 
-model = load_model()
-st.sidebar.success("✅ Model loaded successfully!")
+model = load_cnn_model()
 
-# ---------------------------
-# Helper functions
-# ---------------------------
-def load_light_curve(file):
-    if file.name.endswith(".fits"):
-        with fits.open(file) as hdul:
-            data = hdul[1].data
-            flux = data["PDCSAP_FLUX"]
-            flux = flux[np.isfinite(flux)]
-            return flux
-    elif file.name.endswith(".csv"):
-        df = pd.read_csv(file)
-        flux = df.iloc[:, 1].values if df.shape[1] > 1 else df.iloc[:, 0].values
-        return flux
-    else:
-        raise ValueError("Unsupported file format. Please upload .csv or .fits")
+# --------------------------------------------------
+# Preprocessing (exactly as during training)
+# --------------------------------------------------
+def preprocess_lightcurve(df):
+    for col in df.columns:
+        if col.lower() in ["index", "label", "labels"]:
+            df = df.drop(columns=[col])
 
-def preprocess_flux(flux):
-    flux = np.nan_to_num(flux)
-    flux = flux - np.mean(flux)
-    flux = flux / np.max(np.abs(flux)) if np.max(np.abs(flux)) != 0 else flux
-    fft_vals = np.abs(fft(flux))
-    fft_vals = fft_vals / np.max(fft_vals) if np.max(fft_vals) != 0 else fft_vals
-    fft_vals = fft_vals.reshape(1, -1, 1)
-    return fft_vals
+    X = df.values
+    if X.ndim == 1:
+        X = X.reshape(1, -1)
+    elif X.shape[0] == 3197 and X.shape[1] != 3197:
+        X = X.T
 
-# ---------------------------
+    # 1️⃣ Fourier transform
+    X = np.abs(np.fft.fft(X, axis=1))
+
+    # 2️⃣ Savitzky–Golay smoothing
+    X = savgol_filter(X, 21, 4, deriv=0)
+
+    # 3️⃣ Normalize (min–max)
+    minval, maxval = np.min(X), np.max(X)
+    X = (X - minval) / (maxval - minval + 1e-8)
+
+    # 4️⃣ Robust scaling
+    scaler = RobustScaler()
+    X = scaler.fit_transform(X)
+
+    # Expand dims for CNN
+    X = np.expand_dims(X, axis=2)
+    return X
+
+# --------------------------------------------------
 # Streamlit UI
-# ---------------------------
-st.title("🔭 Exoplanet Classifier")
-st.write("Upload a Kepler light curve (.csv or .fits) to detect potential exoplanets.")
+# --------------------------------------------------
+st.title("🪐 HELIOS — Exoplanet Detector")
+st.markdown("""
+Upload a **light curve CSV file** (e.g. a Kepler row sample) and this model will apply
+the *same augmentation pipeline* and predict whether it likely represents an **Exoplanet**.
+""")
 
-uploaded_file = st.file_uploader("Upload file", type=["csv", "fits"])
+uploaded_file = st.file_uploader("📂 Upload a CSV file", type=["csv"])
 
-if uploaded_file:
-    st.success("✅ File uploaded successfully!")
-
+if uploaded_file is not None:
     try:
-        flux = load_light_curve(uploaded_file)
-        st.write(f"Data shape: {flux.shape}")
+        df = pd.read_csv(uploaded_file)
+        st.success(f"✅ File uploaded successfully! Shape: {df.shape}")
 
-        processed = preprocess_flux(flux)
-        st.write(f"Processed data shape: {processed.shape}")
+        processed = preprocess_lightcurve(df)
 
-        prediction = model.predict(processed)
-        confidence = float(prediction[0][0])
+        st.write("Processed data shape:", processed.shape)
+        preds = model.predict(processed)
+        confidence = float(preds[0][0])
+        label = "🪐 Exoplanet" if confidence > 0.5 else "❌ Not Exoplanet"
 
         st.subheader("🔭 Prediction Result")
-        if confidence >= 0.5:
-            st.success(f"🪐 Exoplanet detected! (Confidence: {confidence:.2f})")
-        else:
-            st.error(f"❌ Not an exoplanet (Confidence: {confidence:.2f})")
+        st.write(f"**Prediction:** {label}")
+        st.write(f"**Confidence:** {confidence:.4f}")
 
+        st.line_chart(df.T.iloc[0])
     except Exception as e:
-        st.error(f"Error processing file: {e}")
+        st.error(f"⚠️ Error: {e}")
+else:
+    st.info("⬆️ Please upload a CSV file to begin.")
+
+st.markdown("---")
+st.caption("Created by MaxHero123 — Powered by Streamlit + TensorFlow")
