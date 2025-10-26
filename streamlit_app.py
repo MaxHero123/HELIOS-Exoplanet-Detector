@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from scipy.signal import savgol_filter
-from sklearn.preprocessing import RobustScaler
 from tensorflow.keras.models import model_from_json
+import joblib
 
 # --------------------------------------------------
 # Load trained CNN model
@@ -19,7 +19,16 @@ def load_cnn_model():
 model = load_cnn_model()
 
 # --------------------------------------------------
-# Preprocessing function (exactly as during training)
+# Load RobustScaler from training
+# --------------------------------------------------
+@st.cache_resource
+def load_scaler():
+    return joblib.load("robust_scaler.pkl")
+
+scaler = load_scaler()
+
+# --------------------------------------------------
+# Preprocessing (training pipeline)
 # --------------------------------------------------
 def preprocess_lightcurve(df):
     # Drop non-flux columns
@@ -36,12 +45,12 @@ def preprocess_lightcurve(df):
     # 2️⃣ Savitzky-Golay smoothing
     X = savgol_filter(X, 21, 4, deriv=0)
 
-    # 3️⃣ Min-Max normalization
+    # 3️⃣ Min-Max normalization (training-wide min/max would be better)
     minval, maxval = np.min(X), np.max(X)
     X = (X - minval) / (maxval - minval + 1e-8)
 
-    # 4️⃣ Robust scaling
-    X = RobustScaler().fit_transform(X)
+    # 4️⃣ Robust scaling (use **saved scaler**, not fit_transform)
+    X = scaler.transform(X)
 
     # 5️⃣ Expand dims for CNN
     X = np.expand_dims(X, axis=2)
@@ -52,11 +61,9 @@ def preprocess_lightcurve(df):
 # --------------------------------------------------
 st.title("🚀 HELIOS — Exoplanet Detector")
 st.markdown("""
-Upload a **light curve CSV** or use the example to see whether the signal
-represents an **Exoplanet** or **Not Exoplanet**.
+Upload a **light curve CSV** or use the demo to see whether it represents an **Exoplanet**.
 """)
 
-# Option to use example demo file
 use_demo = st.checkbox("Use demo detectable exoplanet row")
 uploaded_file = st.file_uploader("📂 Upload a CSV file", type=["csv"])
 
@@ -69,7 +76,6 @@ elif uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
     st.success(f"✅ File uploaded successfully! Shape: {df.shape}")
 
-    # Preprocess uploaded CSV
     processed = preprocess_lightcurve(df)
     preds = model.predict(processed)
     confidence = float(preds[0][0])
@@ -95,4 +101,3 @@ st.line_chart(plot_df.values.flatten())
 
 st.markdown("---")
 st.caption("Created by MaxHero123 — Powered by Streamlit + TensorFlow")
-
