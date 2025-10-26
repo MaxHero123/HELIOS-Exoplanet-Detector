@@ -19,16 +19,13 @@ model = load_cnn_model()
 # Preprocessing Pipeline (must match training exactly)
 # --------------------------------------------------
 def preprocess_lightcurve(df):
-    # Drop non-numeric and label/index columns
     df = df.select_dtypes(include=[np.number])
     for col in df.columns:
         if "label" in col.lower() or "index" in col.lower():
             df = df.drop(columns=[col])
 
     st.write("🔍 Before flattening:", df.shape)
-    st.write(df.head())
 
-    # Flatten or transpose if needed
     if df.shape[0] == 1:
         X = df.values
     else:
@@ -45,17 +42,18 @@ def preprocess_lightcurve(df):
     except Exception as e:
         st.warning(f"Savitzky–Golay failed: {e}")
 
-    # 🚫 Skip per-sample normalization
-    st.info("Skipping normalization to preserve scale")
+    # ✅ Simple robust normalization instead of scaler
+    minval = np.min(X)
+    maxval = np.max(X)
+    if maxval - minval != 0:
+        X = (X - minval) / (maxval - minval)
+    else:
+        st.warning("Normalization skipped (flat signal).")
 
-    # 3️⃣ Robust scaling (as in training)
-    try:
-        scaler = RobustScaler()
-        X = scaler.fit_transform(X)
-    except Exception as e:
-        st.warning(f"Scaling failed: {e}")
+    # Optionally shift range to -1..1
+    X = 2 * X - 1
 
-    # 4️⃣ Expand dims for CNN
+    # 3️⃣ Expand dims for CNN
     X = np.expand_dims(X, axis=2)
 
     st.write("✅ Finished preprocessing. Stats:")
