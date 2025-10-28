@@ -1,102 +1,134 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
+import json, joblib
 from scipy.signal import savgol_filter
-from tensorflow.keras.models import model_from_json
+from tensorflow.keras.models import load_model
 
-# --------------------------------------------------
-# Load model architecture and weights
-# --------------------------------------------------
+# -------------------------------------------------------
+# 📦 Constants
+# -------------------------------------------------------
+EXPECTED_LEN = 3197
+
+# -------------------------------------------------------
+# 🧠 Load model and preprocessing assets
+# -------------------------------------------------------
 @st.cache_resource
-def load_cnn_model():
-    with open("my_exo_model_arch.json", "r") as f:
-        model_json = f.read()
-    model = model_from_json(model_json)
-    model.load_weights("my_exo_model.weights.h5")
-    return model
+def load_all():
+    model = load_model("my_exo_model.keras")
 
-model = load_cnn_model()
+    # Load normalization parameters
+    with open("norm_params.json") as f:
+        params = json.load(f)
+    minval, maxval = params["minval"], params["maxval"]
 
-# --------------------------------------------------
-# Preprocessing (exactly as during training)
-# --------------------------------------------------
-def preprocess_lightcurve(df):
-    # Drop label/index columns if they exist
-    for col in df.columns:
-        if col.lower() in ["index", "label", "labels"]:
-            df = df.drop(columns=[col])
+    # Load RobustScaler
+    scaler = joblib.load("robust_scaler.joblib")
 
-    X = df.values
-    if X.ndim == 1:
-        X = X.reshape(1, -1)
-    elif X.shape[0] == 3197 and X.shape[1] != 3197:
-        X = X.T
+    return model, minval, maxval, scaler
 
-    # 1️⃣ Fourier transform
-    X = np.abs(np.fft.fft(X, axis=1))
+model, MINVAL, MAXVAL, robust_scaler = load_all()
+
+st.title("🪐 HELIOS — Exoplanet Detector")
+st.caption("Deep Learning Exoplanet Classifier — Fourier + SavGol + RobustScaler pipeline")
+
+# -------------------------------------------------------
+# 🧩 Helper Functions
+# -------------------------------------------------------
+def coerce_numeric_1d(df: pd.DataFrame) -> np.ndarray:
+    """Extract numeric data and flatten to 1D."""
+    df = df.select_dtypes(include=["number"]).copy()
+    drop = [c for c in df.columns if c.lower() in {"label", "labels", "y", "target", "class", "index", "idx"}]
+    if drop:
+        df = df.drop(columns=drop)
+
+    arr = df.values
+    if arr.ndim == 2:
+        if arr.shape[0] == 1:
+            arr = arr[0]
+        elif arr.shape[1] == 1:
+            arr = arr[:, 0]
+        elif arr.shape[1] == EXPECTED_LEN:
+            arr = arr[0, :]
+        elif arr.shape[0] == EXPECTED_LEN:
+            arr = arr[:, 0]
+        else:
+            arr = arr.ravel()
+    return arr.astype("float64", copy=False)
+
+def resample_to_len(x: np.ndarray, L: int) -> np.ndarray:
+    """If user uploads non-3197-length curve, resample to length 3197."""
+    if x.shape[0] == L:
+        return x
+    old = np.linspace(0.0, 1.0, x.shape[0])
+    new = np.linspace(0.0, 1.0, L)
+    return np.interp(new, old, x)
+
+def make_model_input(df: pd.DataFrame) -> np.ndarray:
+    """Apply preprocessing pipeline exactly as in training."""
+    x = coerce_numeric_1d(df)
+    x = resample_to_len(x, EXPECTED_LEN)
+
+    # 1️⃣ Fourier transform magnitude
+    X = np.abs(np.fft.fft(x, axis=0))
 
     # 2️⃣ Savitzky–Golay smoothing
-    X = savgol_filter(X, 21, 4, deriv=0)
+    win = 21 if EXPECTED_LEN >= 21 else (EXPECTED_LEN // 2 * 2 + 1)
+    X = savgol_filter(X, win, 4, deriv=0)
 
-    # 3️⃣ Min–max normalization
-    minval, maxval = np.min(X), np.max(X)
-    X = (X - minval) / (maxval - minval + 1e-8)
+    # 3️⃣ Global min–max normalization (training constants)
+    X = (X - MINVAL) / (MAXVAL - MINVAL + 1e-8)
 
-    # Expand dims for CNN
-    X = np.expand_dims(X, axis=2)
+    # 4️⃣ RobustScaler (fit on training set)
+    X = robust_scaler.transform(X.reshape(1, -1))
+
+    # 5️⃣ Expand dims for Conv1D
+    X = X.reshape(1, EXPECTED_LEN, 1).astype("float32")
+
     return X
 
-# --------------------------------------------------
-# Streamlit UI
-# --------------------------------------------------
-st.title("🪐 HELIOS — Exoplanet Detector")
-st.markdown("""
-Upload a **light curve CSV file** (e.g. a Kepler sample).  
-The app will verify its shape and ask whether it has already been preprocessed.
-""")
+# -------------------------------------------------------
+# 📤 File Upload UI
+# -------------------------------------------------------
+uploaded = st.file_uploader("📂 Upload a light curve CSV file", type=["csv"])
 
-uploaded_file = st.file_uploader("📂 Upload your CSV file", type=["csv"])
-
-if uploaded_file is not None:
+if uploaded:
     try:
-        df = pd.read_csv(uploaded_file)
-        st.success(f"✅ File uploaded successfully! Shape: {df.shape}")
+        df = pd.read_csv(uploaded)
+        st.success(f"✅ File uploaded! Shape: {df.shape}")
 
-        # Check for flux length (must be 3197)
-        flux_length = df.shape[0] if df.shape[0] == 3197 else df.shape[1]
-        if flux_length != 3197:
-            st.error("⚠️ Data must contain exactly 3197 flux points. Please upload a valid Kepler-like light curve.")
-        else:
-            preprocess_needed = st.radio(
-                "Has this data already been preprocessed using the official HELIOS method?",
-                ["No", "Yes"]
-            )
+        # Plot raw flux curve
+        numeric = df.select_dtypes(include=["number"]).drop(columns=[c for c in df.columns if c.lower() in {"label","labels"}], errors="ignore")
+        st.line_chart(numeric.values.flatten(), height=200)
 
-            if preprocess_needed == "No":
-                st.info("🔧 Running preprocessing pipeline...")
-                processed = preprocess_lightcurve(df)
-            else:
-                st.info("✅ Using your uploaded data directly.")
-                processed = df.values
-                if processed.ndim == 1:
-                    processed = processed.reshape(1, -1)
-                processed = np.expand_dims(processed, axis=2)
+        inp = make_model_input(df)
+        st.write("Processed tensor shape:", inp.shape)
 
-            st.write("Processed data shape:", processed.shape)
-            preds = model.predict(processed)
-            confidence = float(preds[0][0])
-            label = "🪐 Exoplanet" if confidence > 0.5 else "❌ Not Exoplanet"
-
-            st.subheader("🔭 Prediction Result")
-            st.write(f"**Prediction:** {label}")
-            st.write(f"**Confidence:** {confidence:.4f}")
-
-            st.line_chart(df.values.flatten())
+        # Predict
+        y = float(model.predict(inp)[0][0])
+        st.metric("Exoplanet Probability", f"{y:.4f}")
+        st.write("Prediction:", "🪐 Exoplanet" if y >= 0.5 else "❌ Not Exoplanet")
 
     except Exception as e:
-        st.error(f"⚠️ Error: {e}")
+        st.error(f"⚠️ Error while processing file: {e}")
+
 else:
-    st.info("⬆️ Please upload a CSV file to begin.")
+    st.info("⬆️ Please upload a CSV file to start analysis.")
+
+# -------------------------------------------------------
+# 🧪 Sanity Check (Optional)
+# -------------------------------------------------------
+st.markdown("---")
+if st.button("Run Sanity Check (use built-in confirmed exoplanet sample)"):
+    try:
+        df_ok = pd.read_csv("exo_true_positive.csv")
+        inp_ok = make_model_input(df_ok)
+        p = float(model.predict(inp_ok)[0][0])
+        st.success(f"✅ Sanity-check probability: {p:.4f}")
+        st.write("Expected result: **🪐 Exoplanet**")
+    except Exception as e:
+        st.error(f"⚠️ Could not run sanity check: {e}")
 
 st.markdown("---")
-st.caption("Created by MaxHero123 — Powered by Streamlit + TensorFlow")
+st.caption("Created by Maximilian Solomon — Powered by TensorFlow + Streamlit 🌌")
+
