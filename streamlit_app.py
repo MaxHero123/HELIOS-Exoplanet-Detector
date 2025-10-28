@@ -5,18 +5,25 @@ import joblib
 from scipy.signal import savgol_filter
 import streamlit as st
 from tensorflow.keras.models import load_model
+import matplotlib.pyplot as plt
+
+# ============================================================
+# 🚀 HELIOS: A Novel ML Pipeline for High Accuracy Exoplanet Detection 
+#             via Light-curve Interpretation with Optimized Fourier 
+#             Analysis and SMOTE Synthesis
+# ============================================================
 
 # -----------------------------
 # ✅ Constants
 # -----------------------------
 EXPECTED_LEN = 3197
-MODEL_FILE = "my_exoplanet_model.keras"  # updated filename
+MODEL_FILE = "my_exoplanet_model.keras"
 NORM_PARAMS_FILE = "norm_params.json"
 SCALER_FILE = "robust_scaler.joblib"
 POSITIVE_SAMPLE_FILE = "exo_true_positive.csv"
 
 # -----------------------------
-# ✅ Load all model artifacts
+# ✅ Load model & preprocessing artifacts
 # -----------------------------
 @st.cache_resource
 def load_all():
@@ -28,15 +35,23 @@ def load_all():
 
 model, MINVAL, MAXVAL, robust_scaler = load_all()
 
-st.title("🔭 Helios: Exoplanet Detector")
-st.write("This model predicts whether a light curve likely represents an exoplanet transit signal.")
+# -----------------------------
+# 🌌 App Header
+# -----------------------------
+st.title("🪐 **HELIOS**")
+st.caption("""
+**A Novel ML Pipeline for High Accuracy Exoplanet Detection  
+via Light-curve Interpretation with Optimized Fourier Analysis  
+and SMOTE Synthesis**
+""")
+st.markdown("---")
 st.write("Model input shape:", model.input_shape)
 
 # -----------------------------
-# ✅ Helper functions
+# ⚙️ Helper Functions
 # -----------------------------
 def coerce_numeric_1d(df: pd.DataFrame) -> np.ndarray:
-    """Extracts numeric flux values from a DataFrame, dropping label or index columns."""
+    """Extract numeric flux values from uploaded CSV."""
     df = df.select_dtypes(include=["number"]).copy()
     drop = [c for c in df.columns if c.lower() in {"label","labels","y","target","class","index","idx"}]
     if drop:
@@ -58,7 +73,7 @@ def coerce_numeric_1d(df: pd.DataFrame) -> np.ndarray:
 
 
 def resample_to_len(x: np.ndarray, L: int) -> np.ndarray:
-    """Resamples flux series to length L using linear interpolation."""
+    """Resample light curve to the expected length (3197)."""
     if x.shape[0] == L:
         return x
     old = np.linspace(0.0, 1.0, x.shape[0])
@@ -67,8 +82,8 @@ def resample_to_len(x: np.ndarray, L: int) -> np.ndarray:
 
 
 def make_model_input(df: pd.DataFrame) -> np.ndarray:
-    """Mirrors the training preprocessing pipeline exactly."""
-    # 1️⃣ Numeric → 3197 samples
+    """Preprocess uploaded data exactly like in model training."""
+    # 1️⃣ Ensure numeric and correct length
     x = coerce_numeric_1d(df)
     x = resample_to_len(x, EXPECTED_LEN)
 
@@ -82,10 +97,10 @@ def make_model_input(df: pd.DataFrame) -> np.ndarray:
     # 4️⃣ Global min–max normalization using training constants
     X = (X - MINVAL) / (MAXVAL - MINVAL + 1e-8)
 
-    # 5️⃣ RobustScaler (same one used in training)
+    # 5️⃣ RobustScaler (same one from training)
     X = robust_scaler.transform(X.reshape(1, -1))
 
-    # 6️⃣ Expand dimensions → (1, 3197, 1)
+    # 6️⃣ Expand dims for Conv1D
     X = X.reshape(1, EXPECTED_LEN, 1).astype("float32")
 
     assert X.shape == (1, EXPECTED_LEN, 1), f"Bad shape {X.shape}"
@@ -94,9 +109,9 @@ def make_model_input(df: pd.DataFrame) -> np.ndarray:
 
 
 # -----------------------------
-# ✅ UI for file upload
+# 📁 Upload + Predict
 # -----------------------------
-uploaded = st.file_uploader("📁 Upload a single light-curve CSV", type=["csv"])
+uploaded = st.file_uploader("📂 Upload a single light-curve CSV", type=["csv"])
 
 if uploaded:
     df = pd.read_csv(uploaded)
@@ -105,28 +120,27 @@ if uploaded:
     st.write("Tensor → model:", inp.shape, inp.dtype,
              "min:", float(inp.min()), "max:", float(inp.max()))
 
-    # Run prediction
     y = float(model.predict(inp)[0][0])
-    st.metric("Exoplanet probability", f"{y:.4f}")
+    st.metric("🔭 Exoplanet Probability", f"{y:.4f}")
 
-    thr = st.slider("Decision threshold", 0.0, 1.0, 0.5, 0.01)
-    st.write("Prediction:", "✅ Exoplanet" if y >= thr else "❌ Not Exoplanet")
+    thr = st.slider("Decision Threshold", 0.0, 1.0, 0.5, 0.01)
+    prediction = "🪐 **Exoplanet Detected**" if y >= thr else "❌ **Not Exoplanet**"
+    st.subheader(prediction)
 
 # -----------------------------
-# ✅ Sanity check button
+# 🧪 Sanity Check
 # -----------------------------
-if st.button("Run Sanity Check (bundled positive)"):
+if st.button("Run Sanity Check (Bundled Positive Example)"):
     df_ok = pd.read_csv(POSITIVE_SAMPLE_FILE)
     inp_ok = make_model_input(df_ok)
     p = float(model.predict(inp_ok)[0][0])
-    st.success(f"Sanity-check probability: {p:.4f}")
+    st.success(f"Sanity-check probability: **{p:.4f}**")
 
 # -----------------------------
-# ✅ Optional visualization
+# 📊 Visualization
 # -----------------------------
 if uploaded:
     st.subheader("🧠 Preprocessing Visualization")
-    import matplotlib.pyplot as plt
 
     raw_flux = coerce_numeric_1d(df)
     proc_flux = np.abs(np.fft.fft(raw_flux))
@@ -138,3 +152,9 @@ if uploaded:
     ax[1].plot(proc_flux, color="orange")
     ax[1].set_title("Processed (FFT + SavGol) Flux")
     st.pyplot(fig)
+
+# -----------------------------
+# 🧾 Footer
+# -----------------------------
+st.markdown("---")
+st.caption("Developed as part of the HELIOS Project — A Novel ML Pipeline for High Accuracy Exoplanet Detection via Light-curve Interpretation with Optimized Fourier Analysis and SMOTE Synthesis.")
