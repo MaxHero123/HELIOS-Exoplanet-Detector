@@ -1,93 +1,161 @@
-import streamlit as st
 import numpy as np
 import pandas as pd
+import json
 import joblib
-import matplotlib.pyplot as plt
+from scipy.signal import savgol_filter
+import streamlit as st
 from tensorflow.keras.models import load_model
+import matplotlib.pyplot as plt
 
-# --------------------------------------------------
-# Load model and preprocessing assets
-# --------------------------------------------------
+# ============================================================
+# 🚀 HELIOS: A Novel ML Pipeline for High Accuracy Exoplanet Detection 
+#             via Light-curve Interpretation with Optimized Fourier 
+#             Analysis and SMOTE Synthesis
+# ============================================================
+
+# -----------------------------
+# ✅ Constants
+# -----------------------------
+EXPECTED_LEN = 3197
+MODEL_FILE = "my_exoplanet_model.keras"
+NORM_PARAMS_FILE = "norm_params.json"
+SCALER_FILE = "robust_scaler.joblib"
+POSITIVE_SAMPLE_FILE = "exo_true_positive.csv"
+
+# -----------------------------
+# ✅ Load model & preprocessing artifacts
+# -----------------------------
 @st.cache_resource
 def load_all():
-    model = load_model("my_exoplanet_model.keras")  # Updated model name
-    try:
-        scaler = joblib.load("robust_scaler.pkl")
-    except FileNotFoundError:
-        scaler = None
-    MINVAL, MAXVAL = 0, 1
-    return model, MINVAL, MAXVAL, scaler
+    model = load_model(MODEL_FILE)
+    with open(NORM_PARAMS_FILE) as f:
+        params = json.load(f)
+    scaler = joblib.load(SCALER_FILE)
+    return model, params["minval"], params["maxval"], scaler
 
 model, MINVAL, MAXVAL, robust_scaler = load_all()
 
-# --------------------------------------------------
-# HELIOS Interface
-# --------------------------------------------------
-st.markdown(
-    "<h1 style='text-align: center; color: gold;'>🔭 HELIOS: High-Accuracy Exoplanet Detector</h1>",
-    unsafe_allow_html=True,
-)
-st.caption("A Novel ML Pipeline for High Accuracy Exoplanet Detection via Light-curve Interpretation with Optimized Fourier Analysis and SMOTE Synthesis.")
-st.write("---")
+# -----------------------------
+# 🌌 App Header
+# -----------------------------
+st.title("🪐 **HELIOS**")
+st.caption("""
+**A Novel ML Pipeline for High Accuracy Exoplanet Detection  
+via Light-curve Interpretation with Optimized Fourier Analysis  
+and SMOTE Synthesis**
+""")
+st.markdown("---")
+st.write("Model input shape:", model.input_shape)
 
-st.write("### Upload your light curve CSV file below:")
-uploaded_file = st.file_uploader("Choose a CSV file", type=["csv"])
+# -----------------------------
+# ⚙️ Helper Functions
+# -----------------------------
+def coerce_numeric_1d(df: pd.DataFrame) -> np.ndarray:
+    """Extract numeric flux values from uploaded CSV."""
+    df = df.select_dtypes(include=["number"]).copy()
+    drop = [c for c in df.columns if c.lower() in {"label","labels","y","target","class","index","idx"}]
+    if drop:
+        df = df.drop(columns=drop)
 
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
+    arr = df.values
+    if arr.ndim == 2:
+        if arr.shape[0] == 1:
+            arr = arr[0]
+        elif arr.shape[1] == 1:
+            arr = arr[:, 0]
+        elif arr.shape[1] == EXPECTED_LEN:
+            arr = arr[0, :]
+        elif arr.shape[0] == EXPECTED_LEN:
+            arr = arr[:, 0]
+        else:
+            arr = arr.ravel()
+    return arr.astype("float64", copy=False)
 
-    # Handle missing values
-    df = df.dropna(axis=1, how="all").dropna()
-    flux = df.values.flatten()
 
-    st.write("#### 📊 Uploaded Data Overview")
-    st.line_chart(flux)
+def resample_to_len(x: np.ndarray, L: int) -> np.ndarray:
+    """Resample light curve to the expected length (3197)."""
+    if x.shape[0] == L:
+        return x
+    old = np.linspace(0.0, 1.0, x.shape[0])
+    new = np.linspace(0.0, 1.0, L)
+    return np.interp(new, old, x)
 
-    # --------------------------------------------------
-    # Check for correct length
-    # --------------------------------------------------
-    if len(flux) != 3197:
-        st.error("⚠️ Data must contain exactly 3197 flux points. Please upload a valid Kepler-like light curve.")
-    else:
-        # Ask user if preprocessed
-        preprocessed = st.radio(
-            "Has your data been preprocessed using the HELIOS Fourier + normalization pipeline?",
-            ("No", "Yes"),
-        )
 
-        if st.button("🚀 Run HELIOS Detection"):
-            with st.spinner("Analyzing light curve data... please wait 🌠"):
-                data = flux.copy()
+def make_model_input(df: pd.DataFrame) -> np.ndarray:
+    """Preprocess uploaded data exactly like in model training."""
+    # 1️⃣ Ensure numeric and correct length
+    x = coerce_numeric_1d(df)
+    x = resample_to_len(x, EXPECTED_LEN)
 
-                # Apply preprocessing only if needed
-                if preprocessed == "No":
-                    data = (data - np.min(data)) / (np.max(data) - np.min(data))  # normalize 0–1
-                    data = np.nan_to_num(data)
-                
-                # Reshape for model
-                data = np.expand_dims(data, axis=(0, -1))
+    # 2️⃣ FFT magnitude
+    X = np.abs(np.fft.fft(x, axis=0))
 
-                # Run prediction
-                prediction = model.predict(data)[0][0]
-                confidence = float(prediction)
+    # 3️⃣ Savitzky–Golay smoothing (window=21, poly=4)
+    win = 21 if EXPECTED_LEN >= 21 else (EXPECTED_LEN // 2 * 2 + 1)
+    X = savgol_filter(X, win, 4, deriv=0)
 
-            # --------------------------------------------------
-            # Display Result
-            # --------------------------------------------------
-            if confidence >= 0.5:
-                st.success(f"🌌 **Signal Detected!** HELIOS confirms this is an exoplanet with {confidence:.2%} confidence.")
-                st.balloons()
-            else:
-                st.warning(f"❌ No exoplanet signal detected. Confidence: {confidence:.2%}")
+    # 4️⃣ Global min–max normalization using training constants
+    X = (X - MINVAL) / (MAXVAL - MINVAL + 1e-8)
 
-            # --------------------------------------------------
-            # Optional: Plot light curve again with label
-            # --------------------------------------------------
-            st.write("### 🪐 Light Curve Visualization")
-            fig, ax = plt.subplots()
-            ax.plot(flux, color="gold")
-            ax.set_xlabel("Time (Kepler Cadence)")
-            ax.set_ylabel("Flux")
-            ax.set_title("Light Curve")
-            st.pyplot(fig)
+    # 5️⃣ RobustScaler (same one from training)
+    X = robust_scaler.transform(X.reshape(1, -1))
+
+    # 6️⃣ Expand dims for Conv1D
+    X = X.reshape(1, EXPECTED_LEN, 1).astype("float32")
+
+    assert X.shape == (1, EXPECTED_LEN, 1), f"Bad shape {X.shape}"
+    assert np.isfinite(X).all(), "NaN or inf in preprocessed input"
+    return X
+
+
+# -----------------------------
+# 📁 Upload + Predict
+# -----------------------------
+uploaded = st.file_uploader("📂 Upload a single light-curve CSV", type=["csv"])
+
+if uploaded:
+    df = pd.read_csv(uploaded)
+    inp = make_model_input(df)
+
+    st.write("Tensor → model:", inp.shape, inp.dtype,
+             "min:", float(inp.min()), "max:", float(inp.max()))
+
+    y = float(model.predict(inp)[0][0])
+    st.metric("🔭 Exoplanet Probability", f"{y:.4f}")
+
+    thr = st.slider("Decision Threshold", 0.0, 1.0, 0.5, 0.01)
+    prediction = "🪐 **Exoplanet Detected**" if y >= thr else "❌ **Not Exoplanet**"
+    st.subheader(prediction)
+
+# -----------------------------
+# 🧪 Sanity Check
+# -----------------------------
+if st.button("Run Sanity Check (Bundled Positive Example)"):
+    df_ok = pd.read_csv(POSITIVE_SAMPLE_FILE)
+    inp_ok = make_model_input(df_ok)
+    p = float(model.predict(inp_ok)[0][0])
+    st.success(f"Sanity-check probability: **{p:.4f}**")
+
+# -----------------------------
+# 📊 Visualization
+# -----------------------------
+if uploaded:
+    st.subheader("🧠 Preprocessing Visualization")
+
+    raw_flux = coerce_numeric_1d(df)
+    proc_flux = np.abs(np.fft.fft(raw_flux))
+    proc_flux = savgol_filter(proc_flux, 21, 4)
+
+    fig, ax = plt.subplots(2, 1, figsize=(10, 6))
+    ax[0].plot(raw_flux, color="gray")
+    ax[0].set_title("Raw Input Flux")
+    ax[1].plot(proc_flux, color="orange")
+    ax[1].set_title("Processed (FFT + SavGol) Flux")
+    st.pyplot(fig)
+
+# -----------------------------
+# 🧾 Footer
+# -----------------------------
+st.markdown("---")
+st.caption("Developed as part of the HELIOS Project — A Novel ML Pipeline for High Accuracy Exoplanet Detection via Light-curve Interpretation with Optimized Fourier Analysis and SMOTE Synthesis.")
 
