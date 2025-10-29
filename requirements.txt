@@ -1,7 +1,8 @@
 streamlit
 tensorflow
-numpy
 pandas
+numpy
 scipy
 matplotlib
 joblib
+scikit-learn==1.5.2
