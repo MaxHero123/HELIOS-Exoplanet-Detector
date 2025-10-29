@@ -157,5 +157,6 @@ if uploaded:
 # 🧾 Footer
 # -----------------------------
 st.markdown("---")
-st.caption("Developed as part of the HELIOS Project — A Novel ML Pipeline for High Accuracy Exoplanet Detection via Light-curve Interpretation with Optimized Fourier Analysis and SMOTE Synthesis.")
+st.caption("Developed by HELIOS — A Novel ML Pipeline for High Accuracy Exoplanet Detection via Light-curve Interpretation with Optimized Fourier Analysis and SMOTE Synthesis.")
+
 
