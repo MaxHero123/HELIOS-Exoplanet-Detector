@@ -157,6 +157,6 @@ if uploaded:
 # 🧾 Footer
 # -----------------------------
 st.markdown("---")
-st.caption("Developed by Maximilian Solomon")
+st.caption("Developed by Maximilian Solomon on NASA Kepler Flux Data")
 
 
