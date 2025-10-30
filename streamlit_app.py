@@ -38,7 +38,7 @@ model, MINVAL, MAXVAL, robust_scaler = load_all()
 # -----------------------------
 # 🌌 App Header
 # -----------------------------
-st.title("🪐 **HELIOS**")
+st.title("🪐 **HELIOS - Exoplanet Detector**")
 st.caption("""
 **A Novel ML Pipeline for High Accuracy Exoplanet Detection  
 via Light-curve Interpretation with Optimized Fourier Analysis  
@@ -157,6 +157,6 @@ if uploaded:
 # 🧾 Footer
 # -----------------------------
 st.markdown("---")
-st.caption("Developed by HELIOS — A Novel ML Pipeline for High Accuracy Exoplanet Detection via Light-curve Interpretation with Optimized Fourier Analysis and SMOTE Synthesis.")
+st.caption("Developed by Maximilian Solomon")
 
 
