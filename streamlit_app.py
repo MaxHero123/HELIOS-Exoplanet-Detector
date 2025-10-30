@@ -157,6 +157,6 @@ if uploaded:
 # 🧾 Footer
 # -----------------------------
 st.markdown("---")
-st.caption("Developed by Maximilian Solomon on NASA Kepler Flux Data")
+st.caption("Developed by Maximilian Solomon -- Model Trained on NASA Kepler Flux Data -- Preprocessing Pipeline: Fourier Transform - Savitzy-Golay Filter - Normalization - Robust Scaling")
 
 
